@@ -3,6 +3,8 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
+import { scheduleInactivityNotification, cancelInactivityNotification } from '../utils/smartNotifications';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
@@ -20,6 +22,8 @@ export const unstable_settings = {
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
+import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
+
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -33,7 +37,29 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded) {
       SplashScreen.hideAsync();
+      
+      // Pedir permisos de notificaciones al abrir la app
+      registerForPushNotificationsAsync().then(token => {
+        if (token) {
+          console.log('Token listo para enviar al backend:', token);
+        }
+      });
     }
+
+    // Listener para el estado de la aplicación (Fondo vs Primer plano)
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        // El usuario ha cerrado o minimizado la app
+        scheduleInactivityNotification();
+      } else if (nextAppState === 'active') {
+        // El usuario ha vuelto a la app
+        cancelInactivityNotification();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, [loaded]);
 
   if (!loaded) {
