@@ -92,7 +92,9 @@ function RootLayoutNav() {
         <Stack.Screen name="driver-profile" options={{ headerShown: false }} />
         <Stack.Screen name="driver-registration" options={{ headerShown: false }} />
         <Stack.Screen name="food-delivery" options={{ headerShown: false }} />
+        <Stack.Screen name="legal/[slug]" options={{ headerShown: false }} />
         <Stack.Screen name="rating" options={{ headerShown: false }} />
+        <Stack.Screen name="restaurant-registration" options={{ headerShown: false }} />
         <Stack.Screen name="referrals" options={{ headerShown: false }} />
         <Stack.Screen name="restaurant-dashboard" options={{ headerShown: false }} />
         <Stack.Screen name="restaurant-menu" options={{ headerShown: false }} />
