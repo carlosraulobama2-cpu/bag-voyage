@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, Image, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
+import { api, ApiError } from '../src/services/api';
 
 export default function DriverRegistrationScreen() {
   const router = useRouter();
@@ -10,6 +11,8 @@ export default function DriverRegistrationScreen() {
   const [licensePlate, setLicensePlate] = useState('');
   const [dniImage, setDniImage] = useState<string | null>(null);
   const [iban, setIban] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   const pickImage = async () => {
@@ -25,9 +28,31 @@ export default function DriverRegistrationScreen() {
     }
   };
 
+  const enviarSolicitud = async () => {
+    setEnviando(true);
+    setError(null);
+    try {
+      const dniFotoUrl = dniImage ? (await api.uploads.subirImagen(dniImage)).url : undefined;
+      await api.vehiculos.register({
+        tipo: vehicleType,
+        placa: licensePlate,
+        dniFotoUrl,
+        iban,
+      });
+      setIsSubmitted(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'No se pudo enviar la solicitud. Probá de nuevo.');
+    } finally {
+      setEnviando(false);
+    }
+  };
+
   const handleNext = () => {
-    if (step < 3) setStep(step + 1);
-    else setIsSubmitted(true);
+    if (step < 3) {
+      setStep(step + 1);
+      return;
+    }
+    enviarSolicitud();
   };
 
   if (isSubmitted) {
@@ -111,19 +136,25 @@ export default function DriverRegistrationScreen() {
               onChangeText={setIban}
               keyboardType="default"
             />
+            {error && <Text style={styles.errorText}>{error}</Text>}
           </View>
         )}
 
-        <TouchableOpacity 
-          style={styles.button} 
+        <TouchableOpacity
+          style={[styles.button, enviando && styles.buttonDisabled]}
           onPress={handleNext}
           disabled={
+            enviando ||
             (step === 1 && (!vehicleType || !licensePlate)) ||
             (step === 2 && !dniImage) ||
             (step === 3 && !iban)
           }
         >
-          <Text style={styles.buttonText}>{step === 3 ? 'Enviar Solicitud' : 'Siguiente'}</Text>
+          {enviando ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.buttonText}>{step === 3 ? 'Enviar Solicitud' : 'Siguiente'}</Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -245,6 +276,15 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  errorText: {
+    color: '#E53E3E',
+    marginTop: 12,
+    fontSize: 14,
+    textAlign: 'center',
   },
   successEmoji: {
     fontSize: 60,

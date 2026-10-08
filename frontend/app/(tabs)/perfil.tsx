@@ -84,6 +84,16 @@ export default function PerfilScreen() {
                     <SymbolView name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} size={20} tintColor="#E53E3E" />
                 </TouchableOpacity>
 
+                {/* Opción: registrar un comercio nuevo (restaurante/tienda) */}
+                <TouchableOpacity
+                    style={styles.settingItem}
+                    onPress={() => require('expo-router').router.push('/restaurant-registration')}
+                >
+                    <SymbolView name={{ ios: 'storefront', android: 'storefront', web: 'storefront' }} size={24} tintColor="#E53E3E" />
+                    <Text style={[styles.settingText, { color: '#E53E3E', fontWeight: 'bold' }]}>Registra tu Comercio</Text>
+                    <SymbolView name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} size={20} tintColor="#E53E3E" />
+                </TouchableOpacity>
+
                 {/* Opción 3: Historial de Viajes */}
                 <TouchableOpacity 
                     style={styles.settingItem}
