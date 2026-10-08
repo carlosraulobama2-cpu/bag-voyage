@@ -1,16 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions, TextInput, ActivityIndicator, Alert, ScrollView, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, TextInput, ActivityIndicator, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import { io, Socket } from 'socket.io-client';
 import { RideMapView } from '../components/RideMapView';
+import { api, ApiError } from '../src/services/api';
+import { SOCKET_URL } from '../src/config';
 
 const { width, height } = Dimensions.get('window');
 
-// Para probar en Simulador iOS es localhost. Para Emulador Android es 10.0.2.2
-const BACKEND_URL = Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+interface IncomingBid {
+  bidId: string;
+  driverSocketId: string;
+  driverId?: string;
+  driverName: string;
+  price: number;
+  distance?: number;
+}
+
+interface RideMatched {
+  rideId: string;
+  conductor: { id: string; nombre: string; apellidos: string; rating: string };
+  vehiculo: { marca: string | null; modelo: string | null; color: string | null; placa: string; fotoUrl: string | null };
+  distanciaKm: number | null;
+  etaMinutos: number | null;
+}
 
 const mockDrivers = [
   { id: '1', lat: 3.7504, lng: 8.7860, type: 'Coche' },
@@ -38,11 +54,18 @@ export default function RideMapScreen() {
   const [status, setStatus] = useState<'idle' | 'bidding' | 'found'>('idle');
   const [scheduleTime, setScheduleTime] = useState('Ahora');
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [incomingBids, setIncomingBids] = useState<any[]>([]);
+  const [incomingBids, setIncomingBids] = useState<IncomingBid[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [surgeMultiplier, setSurgeMultiplier] = useState(1);
+  const [rideId, setRideId] = useState<string | null>(null);
+  const [enviandoSolicitud, setEnviandoSolicitud] = useState(false);
   const basePrice = 1500;
   const finalPrice = basePrice * surgeMultiplier;
+  // Los listeners de socket se registran una sola vez (ver useEffect con []
+  // más abajo) y por eso no "ven" `destination`/`finalPrice` actualizados;
+  // esta ref guarda el pedido que de verdad se mandó al backend para que
+  // `ride_matched` pueda referenciarlo sin quedarse con el valor inicial.
+  const pedidoEnCursoRef = useRef<{ destination: string; price: number } | null>(null);
 
   useEffect(() => {
     // Simulamos un algoritmo de Surge Pricing: Alta Demanda aleatoria
@@ -63,7 +86,7 @@ export default function RideMapScreen() {
     })();
 
     // 2. Conectar al Servidor de Tiempo Real
-    const newSocket = io(BACKEND_URL);
+    const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
@@ -72,9 +95,39 @@ export default function RideMapScreen() {
     });
 
     // 3. Escuchar ofertas reales del servidor
-    newSocket.on('incoming_bid', (data) => {
-      console.log('Recibida oferta del servidor:', data);
-      setIncomingBids(prev => [...prev, data]);
+    newSocket.on('incoming_bid', (data: IncomingBid) => {
+      setIncomingBids((prev) => [...prev, data]);
+    });
+
+    // 4. El pasajero aceptó una oferta y el servidor confirmó el emparejamiento:
+    // acá es donde llega el perfil real del conductor + su auto + distancia/ETA.
+    newSocket.on('ride_matched', (data: RideMatched) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const pedido = pedidoEnCursoRef.current;
+      router.push({
+        pathname: '/active-trip',
+        params: {
+          rideId: data.rideId,
+          destination: pedido?.destination ?? '',
+          price: String(pedido?.price ?? ''),
+          driverNombre: data.conductor.nombre,
+          driverApellidos: data.conductor.apellidos,
+          driverRating: data.conductor.rating,
+          vehiculoMarca: data.vehiculo.marca ?? '',
+          vehiculoModelo: data.vehiculo.modelo ?? '',
+          vehiculoColor: data.vehiculo.color ?? '',
+          vehiculoPlaca: data.vehiculo.placa,
+          vehiculoFotoUrl: data.vehiculo.fotoUrl ?? '',
+          distanciaKm: data.distanciaKm != null ? String(data.distanciaKm) : '',
+          etaMinutos: data.etaMinutos != null ? String(data.etaMinutos) : '',
+        },
+      });
+      setStatus('idle');
+      setIncomingBids([]);
+    });
+
+    newSocket.on('accept_bid_error', (data: { message: string }) => {
+      Alert.alert('No se pudo confirmar', data.message);
     });
 
     return () => {
@@ -82,48 +135,54 @@ export default function RideMapScreen() {
     };
   }, []);
 
-  const handleRequestRide = () => {
+  const handleRequestRide = async () => {
     if (!destination) {
       Alert.alert('Faltan Datos', 'Por favor ingresa un destino.');
       return;
     }
-    
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setStatus('bidding'); // Lo usaremos como estado de "buscando"
-
-    // Enviar solicitud REAL al servidor WebSocket
-    if (socket) {
-      socket.emit('request_ride', {
-        rideId: Math.random().toString(36).substring(7),
-        city: 'malabo',
-        pickup: location ? location.coords : { latitude: 3.7504, longitude: 8.7860 },
-        destination: destination,
-        offerPrice: finalPrice.toString() // Precio dinámico
-      });
+    if (!location) {
+      Alert.alert('Ubicación no disponible', 'Necesitamos tu ubicación para pedir un viaje.');
+      return;
     }
 
-    // MOCK: Simulamos que tras 3 segundos, encuentra un conductor y lo asigna automáticamente
-    setTimeout(() => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        '¡Conductor Encontrado!',
-        'Carlos Díaz va en camino a recogerte.',
-        [{ text: 'Ver Viaje', onPress: () => router.push('/active-trip') }]
-      );
-      setStatus('idle');
-    }, 3000);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setEnviandoSolicitud(true);
+    try {
+      // El viaje se crea primero en el backend (queda un registro real con
+      // pickup/destino/precio ofertado) y recién con ese id real se avisa
+      // por WebSocket a los conductores — antes el rideId era un string al
+      // azar generado en el cliente, que no existía en ningún lado.
+      const { ride } = await api.rides.crear({
+        pickupLat: location.coords.latitude,
+        pickupLng: location.coords.longitude,
+        destination,
+        offerPrice: finalPrice,
+      });
+      setRideId(ride.id);
+      pedidoEnCursoRef.current = { destination, price: finalPrice };
+      setStatus('bidding');
+
+      socket?.emit('request_ride', {
+        rideId: ride.id,
+        city: 'malabo',
+        pickup: location.coords,
+        destination,
+        offerPrice: finalPrice.toString(),
+      });
+    } catch (e) {
+      Alert.alert('No se pudo pedir el viaje', e instanceof ApiError ? e.message : 'Probá de nuevo en un momento.');
+    } finally {
+      setEnviandoSolicitud(false);
+    }
   };
 
-  const acceptBid = (bid: any) => {
-    // Avisar al servidor que aceptamos
-    if (socket) {
-      socket.emit('accept_bid', {
-        rideId: 'dummy_ride_id',
-        driverId: bid.driverId
-      });
-    }
-    // Navegar a Viaje Activo
-    router.push('/active-trip');
+  const acceptBid = (bid: IncomingBid) => {
+    if (!socket || !rideId) return;
+    socket.emit('accept_bid', {
+      rideId,
+      driverSocketId: bid.driverSocketId,
+      price: bid.price,
+    });
   };
 
   const initialRegion = {
@@ -237,19 +296,42 @@ export default function RideMapScreen() {
               </View>
             ) : null}
 
-            <TouchableOpacity style={styles.requestBtn} onPress={handleRequestRide}>
-              <Text style={styles.requestBtnText}>Solicitar Viaje</Text>
+            <TouchableOpacity style={[styles.requestBtn, enviandoSolicitud && { opacity: 0.7 }]} onPress={handleRequestRide} disabled={enviandoSolicitud}>
+              {enviandoSolicitud ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.requestBtnText}>Solicitar Viaje</Text>}
             </TouchableOpacity>
           </>
         )}
 
         {status === 'bidding' && (
-          <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
-            <ActivityIndicator size="large" color="#1E7C67" style={{ marginBottom: 20 }} />
-            <Text style={styles.searchingTitle}>Buscando al conductor más cercano...</Text>
-            <Text style={styles.searchingSub}>Asignación automática por {finalPrice} FCFA</Text>
+          <View>
+            {incomingBids.length === 0 ? (
+              <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#1E7C67" style={{ marginBottom: 20 }} />
+                <Text style={styles.searchingTitle}>Buscando al conductor más cercano...</Text>
+                <Text style={styles.searchingSub}>Tu oferta: {finalPrice} FCFA</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.searchingTitle}>¡Tenés {incomingBids.length} oferta{incomingBids.length > 1 ? 's' : ''}!</Text>
+                {incomingBids.map((bid) => (
+                  <View key={bid.bidId} style={styles.bidCard}>
+                    <View style={styles.bidInfoRow}>
+                      <View style={styles.bidAvatar} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.bidName}>{bid.driverName}</Text>
+                        {bid.distance != null && <Text style={styles.bidCar}>A {bid.distance.toFixed(1)} km de vos</Text>}
+                      </View>
+                      <Text style={styles.bidPrice}>{bid.price} FCFA</Text>
+                    </View>
+                    <TouchableOpacity style={styles.acceptBidBtn} onPress={() => acceptBid(bid)}>
+                      <Text style={styles.acceptBidText}>Aceptar</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </>
+            )}
 
-            <TouchableOpacity style={styles.cancelLink} onPress={() => setStatus('idle')}>
+            <TouchableOpacity style={styles.cancelLink} onPress={() => { setStatus('idle'); setIncomingBids([]); }}>
               <Text style={styles.cancelLinkText}>Cancelar búsqueda</Text>
             </TouchableOpacity>
           </View>

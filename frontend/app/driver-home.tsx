@@ -1,21 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions, Animated, Easing, Platform, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, Animated, Easing, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import { io, Socket } from 'socket.io-client';
 import { RideMapView } from '../components/RideMapView';
+import { SOCKET_URL } from '../src/config';
+import { useAppStore } from '../src/store/useAppStore';
 
 const { width, height } = Dimensions.get('window');
-const BACKEND_URL = Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+
+interface RideRequest {
+  rideId: string;
+  passengerId: string;
+  pickup: { latitude: number; longitude: number };
+  destination: string;
+  offerPrice: string;
+}
 
 export default function DriverHomeScreen() {
   const router = useRouter();
+  const user = useAppStore((s) => s.user);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [isOnline, setIsOnline] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [incomingRequest, setIncomingRequest] = useState<any | null>(null);
+  const [incomingRequest, setIncomingRequest] = useState<RideRequest | null>(null);
+  const [ofertaEnviada, setOfertaEnviada] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   // Empezar a palpitar el radar cuando estamos online buscando
@@ -42,9 +53,33 @@ export default function DriverHomeScreen() {
     })();
   }, []);
 
+  // Mientras está en línea, el backend necesita la posición actualizada del
+  // conductor para calcular distancia/ETA real al confirmar un viaje
+  // (ver `accept_bid` en el backend) — antes sólo se mandaba una vez al
+  // conectar y nunca más se actualizaba.
+  useEffect(() => {
+    if (!isOnline || !socket) return;
+    let subscripcion: Location.LocationSubscription | undefined;
+
+    (async () => {
+      subscripcion = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 20 }, (loc) => {
+        setLocation(loc);
+        socket.emit('update_location', { lat: loc.coords.latitude, lng: loc.coords.longitude });
+      });
+    })();
+
+    return () => subscripcion?.remove();
+  }, [isOnline, socket]);
+
   const toggleOnline = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const newStatus = !isOnline;
+
+    if (newStatus && !user) {
+      Alert.alert('Iniciá sesión', 'Necesitás una cuenta para conectarte como conductor.');
+      return;
+    }
+
     setIsOnline(newStatus);
 
     if (newStatus) {
@@ -53,21 +88,43 @@ export default function DriverHomeScreen() {
       await startBackgroundLocationTracking();
 
       // Conectar al socket y anunciar que estamos online
-      const newSocket = io(BACKEND_URL);
+      const newSocket = io(SOCKET_URL);
       setSocket(newSocket);
-      
+
       newSocket.on('connect', () => {
         console.log('Conductor conectado:', newSocket.id);
         newSocket.emit('join_city', 'malabo');
+        if (location) {
+          newSocket.emit('go_online', {
+            usuarioId: user!.id,
+            lat: location.coords.latitude,
+            lng: location.coords.longitude,
+          });
+        }
+      });
+
+      newSocket.on('go_online_error', (data: { message: string }) => {
+        Alert.alert('No pudimos conectarte', data.message);
+        setIsOnline(false);
+        newSocket.disconnect();
+        setSocket(null);
       });
 
       // Escuchar cuando un pasajero pide viaje
-      newSocket.on('new_ride_request', (data) => {
+      newSocket.on('new_ride_request', (data: RideRequest) => {
         console.log('Nueva solicitud recibida!', data);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); // Vibración de alerta
+        setOfertaEnviada(false);
         setIncomingRequest(data);
       });
 
+      // El pasajero aceptó NUESTRA oferta (puede haber otros conductores ofertando también).
+      newSocket.on('bid_accepted', () => {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('¡Viaje Aceptado!', 'Ve a recoger al pasajero en la ruta indicada.');
+        setIncomingRequest(null);
+        setOfertaEnviada(false);
+      });
     } else {
       const { stopBackgroundLocationTracking } = require('../utils/backgroundTasks');
       await stopBackgroundLocationTracking();
@@ -78,21 +135,25 @@ export default function DriverHomeScreen() {
         setSocket(null);
       }
       setIncomingRequest(null);
+      setOfertaEnviada(false);
     }
   };
 
   const acceptRide = () => {
     if (!socket || !incomingRequest) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
-    socket.emit('accept_bid', {
-      passengerId: incomingRequest.passengerId,
-      rideId: incomingRequest.rideId,
-      driverName: 'Carlos (Conductor VIP)'
-    });
 
-    Alert.alert('¡Viaje Aceptado!', `Ve a recoger al pasajero en la ruta indicada.`);
-    setIncomingRequest(null);
+    // Antes esto llamaba directo a `accept_bid`, el evento que el backend
+    // espera del PASAJERO una vez que elige entre ofertas — un conductor
+    // nunca podía de verdad cerrar un viaje así, `accept_bid` validaba
+    // contra datos que no tenían sentido desde este lado. El conductor
+    // manda su oferta (`send_bid`) y espera a que el pasajero la acepte.
+    socket.emit('send_bid', {
+      rideId: incomingRequest.rideId,
+      passengerId: incomingRequest.passengerId,
+      price: Number(incomingRequest.offerPrice),
+    });
+    setOfertaEnviada(true);
   };
 
   const initialRegion = {
@@ -167,13 +228,19 @@ export default function DriverHomeScreen() {
               <Text style={styles.offerPrice}>{incomingRequest.offerPrice} FCFA</Text>
             </View>
 
-            <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide}>
-              <Text style={styles.acceptBtnText}>ACEPTAR VIAJE</Text>
-            </TouchableOpacity>
+            {ofertaEnviada ? (
+              <Text style={styles.waitingText}>Esperando que el pasajero confirme...</Text>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide}>
+                  <Text style={styles.acceptBtnText}>ACEPTAR VIAJE</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity style={styles.rejectBtn} onPress={() => setIncomingRequest(null)}>
-              <Text style={styles.rejectBtnText}>Ignorar</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.rejectBtn} onPress={() => setIncomingRequest(null)}>
+                  <Text style={styles.rejectBtnText}>Ignorar</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
       )}
@@ -221,7 +288,8 @@ const styles = StyleSheet.create({
   acceptBtn: { backgroundColor: '#1E7C67', paddingVertical: 18, borderRadius: 15, alignItems: 'center', marginBottom: 15 },
   acceptBtnText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
   rejectBtn: { alignItems: 'center', paddingVertical: 10 },
-  rejectBtnText: { color: '#718096', fontSize: 16, fontWeight: '600' }
+  rejectBtnText: { color: '#718096', fontSize: 16, fontWeight: '600' },
+  waitingText: { textAlign: 'center', color: '#4A5568', fontWeight: '600', paddingVertical: 15 }
 });
 
 const darkMapStyle = [

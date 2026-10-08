@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, Alert, Image } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { scheduleRatingReminder } from '../utils/smartNotifications';
 import { RideMapView } from '../components/RideMapView';
@@ -10,7 +10,30 @@ const { width, height } = Dimensions.get('window');
 
 export default function ActiveTripScreen() {
   const router = useRouter();
-  
+  const params = useLocalSearchParams<{
+    rideId?: string;
+    destination?: string;
+    price?: string;
+    driverNombre?: string;
+    driverApellidos?: string;
+    driverRating?: string;
+    vehiculoMarca?: string;
+    vehiculoModelo?: string;
+    vehiculoColor?: string;
+    vehiculoPlaca?: string;
+    vehiculoFotoUrl?: string;
+    distanciaKm?: string;
+    etaMinutos?: string;
+  }>();
+
+  const driverName = params.driverNombre ? `${params.driverNombre} ${params.driverApellidos || ''}`.trim() : 'Carlos Díaz';
+  const carDetails = [params.vehiculoMarca, params.vehiculoModelo].filter(Boolean).join(' ') || 'Vehículo';
+  const carPlate = params.vehiculoPlaca || '----';
+  const etaMinutos = params.etaMinutos ? Number(params.etaMinutos) : null;
+  const distanciaKm = params.distanciaKm ? Number(params.distanciaKm) : null;
+  const destinationText = params.destination || 'tu destino';
+  const priceText = params.price || '1500';
+
   // Posición inicial del conductor (simulada cerca de Malabo)
   const [driverLocation, setDriverLocation] = useState({
     latitude: 3.7504,
@@ -73,7 +96,7 @@ export default function ActiveTripScreen() {
             style={styles.finishBtn} 
             onPress={() => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              scheduleRatingReminder('Carlos Díaz');
+              scheduleRatingReminder(driverName);
               router.replace({ pathname: '/rating', params: { type: 'trip' } });
             }}
           >
@@ -92,32 +115,37 @@ export default function ActiveTripScreen() {
       {/* Panel Inferior (Conductor y Progreso) */}
       <View style={styles.bottomPanel}>
         <View style={styles.progressHeader}>
-          <Text style={styles.timeText}>12 min</Text>
-          <Text style={styles.arrivalText}>Llegada aprox. 15:42</Text>
+          <Text style={styles.timeText}>{etaMinutos != null ? `${etaMinutos} min` : '-- min'}</Text>
+          <Text style={styles.arrivalText}>{distanciaKm != null ? `A ${distanciaKm} km de vos` : 'Llegando'}</Text>
         </View>
 
         <View style={styles.progressBar}>
           <View style={[styles.progressFill, { width: '40%' }]} />
         </View>
 
-        <Text style={styles.destinationText}>Hacia: Aeropuerto Internacional</Text>
+        <Text style={styles.destinationText}>Hacia: {destinationText}</Text>
 
         <View style={styles.divider} />
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.driverInfoRow}
           onPress={() => router.push('/driver-profile')}
         >
           <View style={styles.avatarContainer}>
-            <View style={styles.avatarPlaceholder} />
+            {params.vehiculoFotoUrl ? (
+              <Image source={{ uri: params.vehiculoFotoUrl }} style={styles.avatarPlaceholder} />
+            ) : (
+              <View style={styles.avatarPlaceholder} />
+            )}
             <View style={styles.vipBadge}>
               <SymbolView name={{ ios: 'star.fill', android: 'star', web: 'star' }} size={10} tintColor="#FFFFFF" />
             </View>
           </View>
-          
+
           <View style={styles.driverDetails}>
-            <Text style={styles.driverName}>Carlos Díaz</Text>
-            <Text style={styles.carDetails}>Toyota Prius • 1234 ABC</Text>
+            <Text style={styles.driverName}>{driverName}</Text>
+            <Text style={styles.carDetails}>{carDetails}{params.vehiculoColor ? ` ${params.vehiculoColor}` : ''} • {carPlate}</Text>
+            {params.driverRating && <Text style={styles.carDetails}>⭐ {params.driverRating}</Text>}
           </View>
 
           <View style={styles.contactActions}>
@@ -141,7 +169,7 @@ export default function ActiveTripScreen() {
             <SymbolView name={{ ios: 'creditcard.fill', android: 'wallet', web: 'wallet' }} size={16} tintColor="#1E7C67" />
             <Text style={styles.walletText}>Bag-Vayage Wallet</Text>
           </View>
-          <Text style={styles.priceText}>1500 FCFA</Text>
+          <Text style={styles.priceText}>{priceText} FCFA</Text>
         </View>
       </View>
     </View>
