@@ -24,14 +24,26 @@ const storage = multer.diskStorage({
   },
 });
 
-const TIPOS_PERMITIDOS = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const TIPOS_PERMITIDOS = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  // Notas de voz del chat del viaje (trip-chat.tsx, grabadas con expo-av) —
+  // el formato real depende del dispositivo (m4a en iOS, 3gp/mp4 en Android).
+  'audio/m4a',
+  'audio/x-m4a',
+  'audio/mp4',
+  'audio/aac',
+  'audio/3gpp',
+  'audio/mpeg',
+]);
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB — fotos de DNI/auto/platos, no videos
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB — fotos de DNI/auto/platos o una nota de voz corta, no videos
   fileFilter: (req, file, cb) => {
     if (!TIPOS_PERMITIDOS.has(file.mimetype)) {
-      return cb(new Error('Sólo se permiten imágenes JPG, PNG o WEBP'));
+      return cb(new Error('Tipo de archivo no permitido'));
     }
     cb(null, true);
   },

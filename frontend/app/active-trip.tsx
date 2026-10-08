@@ -153,7 +153,17 @@ export default function ActiveTripScreen() {
               style={styles.actionCircle} 
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push('/trip-chat');
+                router.push({
+                  pathname: '/trip-chat',
+                  params: {
+                    rideId: params.rideId,
+                    driverNombre: params.driverNombre,
+                    driverApellidos: params.driverApellidos,
+                    vehiculoMarca: params.vehiculoMarca,
+                    vehiculoModelo: params.vehiculoModelo,
+                    vehiculoPlaca: params.vehiculoPlaca,
+                  },
+                });
               }}
             >
               <SymbolView name={{ ios: 'message.fill', android: 'chat', web: 'chat' }} size={20} tintColor="#2D3748" />

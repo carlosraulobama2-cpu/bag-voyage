@@ -146,6 +146,15 @@ export interface Vehiculo {
   rating: string;
 }
 
+export interface Mensaje {
+  id: string;
+  remitente_id: string;
+  texto: string | null;
+  audio_url: string | null;
+  leido: boolean;
+  created_at: string;
+}
+
 export interface Ride {
   id: string;
   status: string;
@@ -214,22 +223,30 @@ export const api = {
   calificaciones: {
     crear: (data: { rideId?: string; pedidoId?: string; estrellas: number; comentario?: string }) => http.post('/calificaciones', data),
   },
+  mensajes: {
+    listar: (rideId: string) => http.get<{ data: Mensaje[] }>(`/mensajes/${rideId}`),
+    marcarLeidos: (rideId: string) => http.patch(`/mensajes/${rideId}/leido`),
+  },
   uploads: {
     /** `uri` es el archivo local que entrega expo-image-picker — se sube como multipart. */
-    subirImagen: async (uri: string): Promise<{ url: string }> => {
-      const token = await getToken();
-      const formData = new FormData();
-      const nombreArchivo = uri.split('/').pop() || 'foto.jpg';
-      formData.append('file', { uri, name: nombreArchivo, type: 'image/jpeg' } as unknown as Blob);
-
-      const response = await fetch(`${API_URL}/uploads`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: formData,
-      });
-      const data = await response.json().catch(() => undefined);
-      if (!response.ok) throw new ApiError(data?.message || 'No se pudo subir la imagen', response.status);
-      return data;
-    },
+    subirImagen: (uri: string) => subirArchivo(uri, 'image/jpeg', 'foto.jpg'),
+    /** `uri` es la nota de voz grabada con expo-av (ver trip-chat.tsx). */
+    subirAudio: (uri: string) => subirArchivo(uri, 'audio/m4a', 'nota.m4a'),
   },
 };
+
+async function subirArchivo(uri: string, tipoDefault: string, nombreDefault: string): Promise<{ url: string }> {
+  const token = await getToken();
+  const formData = new FormData();
+  const nombreArchivo = uri.split('/').pop() || nombreDefault;
+  formData.append('file', { uri, name: nombreArchivo, type: tipoDefault } as unknown as Blob);
+
+  const response = await fetch(`${API_URL}/uploads`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: formData,
+  });
+  const data = await response.json().catch(() => undefined);
+  if (!response.ok) throw new ApiError(data?.message || 'No se pudo subir el archivo', response.status);
+  return data;
+}

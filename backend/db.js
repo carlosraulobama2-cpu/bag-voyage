@@ -197,6 +197,24 @@ const initDB = async () => {
       );
     `);
 
+    // Chat del viaje — antes trip-chat.tsx mostraba dos mensajes de ejemplo
+    // en estado local: "enviar" sólo agregaba a la lista propia, nunca
+    // llegaba al otro lado y se perdía al cerrar la app. Se persiste acá y
+    // se entrega en tiempo real reusando la sala `ride:${rideId}` que ya
+    // se arma en `accept_bid` (index.js).
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS mensajes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        ride_id UUID NOT NULL REFERENCES rides(id) ON DELETE CASCADE,
+        remitente_id UUID NOT NULL REFERENCES usuarios(id),
+        texto TEXT,
+        audio_url TEXT,
+        leido BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CHECK (texto IS NOT NULL OR audio_url IS NOT NULL)
+      );
+    `);
+
     // Tabla de Publicaciones (envíos "viajero"/"remitente").
     //
     // routes/publicaciones.js ya leía y escribía esta tabla desde siempre —
@@ -229,6 +247,7 @@ const initDB = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_driver ON rides(driver_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_vehiculos_usuario ON vehiculos(usuario_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_publicaciones_user ON publicaciones(user_id);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mensajes_ride ON mensajes(ride_id, created_at);`);
 
     console.log("✅ Tablas inicializadas correctamente.");
   } catch (err) {

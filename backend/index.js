@@ -19,6 +19,7 @@ const restaurantesRoutes = require('./routes/restaurantes');
 const pedidosRoutes = require('./routes/pedidos');
 const ridesRoutes = require('./routes/rides');
 const calificacionesRoutes = require('./routes/calificaciones');
+const mensajesRoutes = require('./routes/mensajes');
 const { router: uploadsRoutes, UPLOADS_DIR } = require('./routes/uploads');
 
 const app = express();
@@ -74,6 +75,7 @@ app.use('/api/restaurantes', restaurantesRoutes);
 app.use('/api/pedidos', pedidosRoutes);
 app.use('/api/rides', ridesRoutes);
 app.use('/api/calificaciones', calificacionesRoutes);
+app.use('/api/mensajes', mensajesRoutes);
 app.use('/api/uploads', uploadsRoutes);
 
 /**
@@ -136,6 +138,42 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         conductoresEnLinea.delete(socket.id);
         console.log(`🔴 Dispositivo desconectado: ${socket.id}`);
+    });
+
+    /**
+     * El chat del viaje (trip-chat.tsx) abre su propio socket al margen del
+     * que usó ride-map.tsx/driver-home.tsx para emparejar el viaje — ese
+     * otro ya se desconectó al salir de esa pantalla. Sin volver a unirse a
+     * `ride:${rideId}` acá, este socket nunca recibiría `new_message`.
+     */
+    socket.on('join_ride', (rideId) => {
+        if (rideId) socket.join(`ride:${rideId}`);
+    });
+
+    /**
+     * Antes trip-chat.tsx sólo agregaba el mensaje a su propia lista local:
+     * nunca viajaba al otro lado ni sobrevivía a cerrar la app. Se persiste
+     * en `mensajes` y se reenvía a la sala del viaje (pasajero + conductor).
+     */
+    socket.on('send_message', async (data) => {
+        try {
+            if (!data?.rideId || !data?.usuarioId || (!data.texto && !data.audioUrl)) return;
+            const { rows } = await db.query(
+                `INSERT INTO mensajes (ride_id, remitente_id, texto, audio_url) VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+                [data.rideId, data.usuarioId, data.texto || null, data.audioUrl || null],
+            );
+            io.to(`ride:${data.rideId}`).emit('new_message', {
+                id: rows[0].id,
+                rideId: data.rideId,
+                remitenteId: data.usuarioId,
+                texto: data.texto || null,
+                audioUrl: data.audioUrl || null,
+                createdAt: rows[0].created_at,
+            });
+        } catch (err) {
+            console.error('Error en send_message:', err);
+            socket.emit('send_message_error', { message: 'No se pudo enviar el mensaje' });
+        }
     });
 
     // Pasajero solicita un viaje (el rideId ya viene de un POST /api/rides previo — ver app/ride-map.tsx)

@@ -1,26 +1,58 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions, TextInput, FlatList, KeyboardAvoidingView, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, TextInput, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
+import { io, Socket } from 'socket.io-client';
+import { SOCKET_URL } from '../src/config';
+import { useAppStore } from '../src/store/useAppStore';
+import { api, ApiError, type Mensaje } from '../src/services/api';
 
 const { width } = Dimensions.get('window');
 
-// Mensajes mock para empezar
-const initialMessages = [
-  { id: '1', text: 'Voy en camino, llego en 2 minutos.', sender: 'driver', type: 'text', time: '15:40' },
-  { id: '2', text: 'Perfecto, estoy frente al portón rojo.', sender: 'me', type: 'text', time: '15:41' }
-];
+interface ChatMessage {
+  id: string;
+  texto: string | null;
+  audioUri: string | null;
+  isMe: boolean;
+  time: string;
+}
+
+function aChatMessage(m: Mensaje, miId?: string): ChatMessage {
+  return {
+    id: m.id,
+    texto: m.texto,
+    audioUri: m.audio_url,
+    isMe: m.remitente_id === miId,
+    time: new Date(m.created_at).toLocaleTimeString().slice(0, 5),
+  };
+}
 
 export default function TripChatScreen() {
   const router = useRouter();
-  const [messages, setMessages] = useState(initialMessages);
+  const user = useAppStore((s) => s.user);
+  const { rideId, driverNombre, driverApellidos, vehiculoMarca, vehiculoModelo, vehiculoPlaca } = useLocalSearchParams<{
+    rideId?: string;
+    driverNombre?: string;
+    driverApellidos?: string;
+    vehiculoMarca?: string;
+    vehiculoModelo?: string;
+    vehiculoPlaca?: string;
+  }>();
+
+  const driverName = driverNombre ? `${driverNombre} ${driverApellidos || ''}`.trim() : 'Tu conductor';
+  const carInfo = [vehiculoMarca, vehiculoModelo].filter(Boolean).join(' ') + (vehiculoPlaca ? ` • ${vehiculoPlaca}` : '');
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [cargando, setCargando] = useState(true);
   const [inputText, setInputText] = useState('');
-  
+  const socketRef = useRef<Socket | null>(null);
+
   // Estados para audio
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [subiendoAudio, setSubiendoAudio] = useState(false);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
 
@@ -32,19 +64,39 @@ export default function TripChatScreen() {
     };
   }, [sound]);
 
-  const sendMessage = () => {
-    if (!inputText.trim()) return;
-    
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const newMessage = {
-      id: Date.now().toString(),
-      text: inputText,
-      sender: 'me',
-      type: 'text',
-      time: new Date().toLocaleTimeString().slice(0, 5)
+  useEffect(() => {
+    if (!rideId) {
+      setCargando(false);
+      return;
+    }
+
+    api.mensajes
+      .listar(rideId)
+      .then(({ data }) => setMessages(data.map((m) => aChatMessage(m, user?.id))))
+      .catch(() => {})
+      .finally(() => setCargando(false));
+    api.mensajes.marcarLeidos(rideId).catch(() => {});
+
+    const socket = io(SOCKET_URL);
+    socketRef.current = socket;
+    socket.on('connect', () => socket.emit('join_ride', rideId));
+    socket.on('new_message', (data: { id: string; remitenteId: string; texto: string | null; audioUrl: string | null; createdAt: string }) => {
+      setMessages((prev) => [
+        ...prev,
+        aChatMessage({ id: data.id, remitente_id: data.remitenteId, texto: data.texto, audio_url: data.audioUrl, leido: false, created_at: data.createdAt }, user?.id),
+      ]);
+    });
+
+    return () => {
+      socket.disconnect();
     };
-    
-    setMessages(prev => [...prev, newMessage]);
+  }, [rideId]);
+
+  const sendMessage = () => {
+    if (!inputText.trim() || !rideId || !user) return;
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    socketRef.current?.emit('send_message', { rideId, usuarioId: user.id, texto: inputText.trim() });
     setInputText('');
   };
 
@@ -71,23 +123,26 @@ export default function TripChatScreen() {
     if (!recording) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     setIsRecording(false);
-    
+
     try {
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
       setRecording(null);
-      
-      // Añadir la nota de voz a la lista de mensajes
-      if (uri) {
-        const newMessage = {
-          id: Date.now().toString(),
-          text: '🎙️ Nota de Voz',
-          audioUri: uri,
-          sender: 'me',
-          type: 'audio',
-          time: new Date().toLocaleTimeString().slice(0, 5)
-        };
-        setMessages(prev => [...prev, newMessage]);
+
+      // Antes esto agregaba el audio local (`file://...`) directo a la
+      // lista de mensajes: nunca viajaba al servidor, así que el otro lado
+      // (ni el propio dispositivo tras reiniciar) podía reproducirlo. Ahora
+      // se sube como cualquier otra imagen/archivo y se manda la URL real.
+      if (uri && rideId && user) {
+        setSubiendoAudio(true);
+        try {
+          const { url } = await api.uploads.subirAudio(uri);
+          socketRef.current?.emit('send_message', { rideId, usuarioId: user.id, audioUrl: url });
+        } catch (e) {
+          console.error('No se pudo subir la nota de voz', e);
+        } finally {
+          setSubiendoAudio(false);
+        }
       }
     } catch (err) {
       console.error('Failed to stop recording', err);
@@ -120,22 +175,22 @@ export default function TripChatScreen() {
     }
   };
 
-  const renderMessage = ({ item }: { item: any }) => {
-    const isMe = item.sender === 'me';
-    
+  const renderMessage = ({ item }: { item: ChatMessage }) => {
+    const isMe = item.isMe;
+
     return (
       <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.driverMessage]}>
-        {item.type === 'audio' ? (
-          <TouchableOpacity 
-            style={styles.audioContainer} 
-            onPress={() => playAudio(item.audioUri, item.id)}
+        {item.audioUri ? (
+          <TouchableOpacity
+            style={styles.audioContainer}
+            onPress={() => playAudio(item.audioUri!, item.id)}
           >
             <SymbolView name={{ ios: playingId === item.id ? 'pause.circle.fill' : 'play.circle.fill', android: playingId === item.id ? 'pause_circle' : 'play_circle', web: 'play_circle' }} size={28} tintColor={isMe ? '#FFFFFF' : '#1E7C67'} />
             <View style={[styles.audioWave, { backgroundColor: isMe ? '#FFFFFF' : '#CBD5E0' }]} />
-            <Text style={[styles.audioText, isMe && {color: '#FFFFFF'}]}>0:04</Text>
+            <Text style={[styles.audioText, isMe && {color: '#FFFFFF'}]}>🎙️ Nota de voz</Text>
           </TouchableOpacity>
         ) : (
-          <Text style={[styles.messageText, isMe && styles.myMessageText]}>{item.text}</Text>
+          <Text style={[styles.messageText, isMe && styles.myMessageText]}>{item.texto}</Text>
         )}
         <Text style={[styles.messageTime, isMe && styles.myMessageTime]}>{item.time}</Text>
       </View>
@@ -153,8 +208,8 @@ export default function TripChatScreen() {
         <View style={styles.headerInfo}>
           <View style={styles.avatar} />
           <View>
-            <Text style={styles.driverName}>Carlos Díaz</Text>
-            <Text style={styles.carInfo}>Toyota Prius • 1234 ABC</Text>
+            <Text style={styles.driverName}>{driverName}</Text>
+            {!!carInfo && <Text style={styles.carInfo}>{carInfo}</Text>}
           </View>
         </View>
 
@@ -164,13 +219,25 @@ export default function TripChatScreen() {
       </View>
 
       {/* Chat Area */}
-      <FlatList
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        contentContainerStyle={styles.chatList}
-        inverted={false}
-      />
+      {cargando ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color="#1E7C67" size="large" />
+        </View>
+      ) : (
+        <FlatList
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          contentContainerStyle={styles.chatList}
+          inverted={false}
+        />
+      )}
+      {subiendoAudio && (
+        <View style={styles.uploadingBanner}>
+          <ActivityIndicator color="#1E7C67" size="small" />
+          <Text style={styles.uploadingText}>Enviando nota de voz...</Text>
+        </View>
+      )}
 
       {/* Alerta de Grabación (Overlay invisible pero bloqueante si graba) */}
       {isRecording && (
@@ -223,7 +290,10 @@ const styles = StyleSheet.create({
   callBtn: { backgroundColor: '#E6FFFA', padding: 10, borderRadius: 20 },
 
   chatList: { padding: 20, flexGrow: 1, justifyContent: 'flex-end' },
-  
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  uploadingBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 8, backgroundColor: '#E6FFFA' },
+  uploadingText: { color: '#1E7C67', fontWeight: '600', fontSize: 13 },
+
   messageBubble: { maxWidth: '80%', padding: 12, borderRadius: 18, marginBottom: 15 },
   myMessage: { alignSelf: 'flex-end', backgroundColor: '#1E7C67', borderBottomRightRadius: 4 },
   driverMessage: { alignSelf: 'flex-start', backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
