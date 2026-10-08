@@ -139,7 +139,7 @@ export default function RestaurantMenuScreen() {
               <Text style={styles.cartBadgeText}>{totalItems}</Text>
             </View>
             <Text style={styles.checkoutText}>Ver Carrito</Text>
-            <Text style={styles.checkoutPrice}>{totalPrice} FCFA</Text>
+            <Text style={styles.checkoutPrice}>{total} FCFA</Text>
           </TouchableOpacity>
         </View>
       )}

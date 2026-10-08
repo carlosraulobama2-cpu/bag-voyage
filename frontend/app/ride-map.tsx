@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Dimensions, TextInput, ActivityIndicator, Alert, ScrollView, Platform } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
+import * as Haptics from 'expo-haptics';
 import { io, Socket } from 'socket.io-client';
+import { RideMapView } from '../components/RideMapView';
 
 const { width, height } = Dimensions.get('window');
 
@@ -14,6 +15,19 @@ const BACKEND_URL = Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http:/
 const mockDrivers = [
   { id: '1', lat: 3.7504, lng: 8.7860, type: 'Coche' },
   { id: '2', lat: 3.7520, lng: 8.7810, type: 'Coche' },
+];
+
+// --- BASE DE DATOS LOCAL DE GUINEA ECUATORIAL (Simulando el escáner) ---
+const EG_LOCATIONS = [
+  'Barrio Semu, Malabo',
+  'Ela Nguema, Malabo',
+  'Perez, Malabo',
+  'Aeropuerto SSG, Malabo',
+  'Mercado Central, Malabo',
+  'Sampaka, Malabo',
+  'Banapa, Malabo',
+  'Buena Esperanza, Malabo',
+  'Paseo Marítimo, Malabo'
 ];
 
 export default function RideMapScreen() {
@@ -125,20 +139,7 @@ export default function RideMapScreen() {
         <SymbolView name={{ ios: 'arrow.left', android: 'arrow_back', web: 'arrow_back' }} size={24} tintColor="#2D3748" />
       </TouchableOpacity>
 
-      <MapView 
-        style={styles.map} 
-        provider={PROVIDER_DEFAULT}
-        initialRegion={initialRegion}
-        showsUserLocation={true}
-      >
-        {mockDrivers.map(driver => (
-          <Marker key={driver.id} coordinate={{ latitude: driver.lat, longitude: driver.lng }}>
-            <View style={styles.carMarker}>
-              <Text style={{ fontSize: 20 }}>🚕</Text>
-            </View>
-          </Marker>
-        ))}
-      </MapView>
+      <RideMapView style={styles.map} initialRegion={initialRegion} markers={mockDrivers.map((d) => ({ id: d.id, lat: d.lat, lng: d.lng }))} />
 
       <View style={styles.bottomPanel}>
         {status === 'idle' && (
@@ -163,7 +164,7 @@ export default function RideMapScreen() {
                     '¿A qué hora quieres que te recojan? (Ej. 10:00, o dentro de 5 horas)',
                     [
                       { text: 'Cancelar', style: 'cancel' },
-                      { text: 'Programar', onPress: (time) => setScheduleTime(time || 'Programado') }
+                      { text: 'Programar', onPress: (time?: string) => setScheduleTime(time || 'Programado') }
                     ]
                   );
                 }}
@@ -174,19 +175,6 @@ export default function RideMapScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-
-// --- BASE DE DATOS LOCAL DE GUINEA ECUATORIAL (Simulando el escáner) ---
-const EG_LOCATIONS = [
-  'Barrio Semu, Malabo',
-  'Ela Nguema, Malabo',
-  'Perez, Malabo',
-  'Aeropuerto SSG, Malabo',
-  'Mercado Central, Malabo',
-  'Sampaka, Malabo',
-  'Banapa, Malabo',
-  'Buena Esperanza, Malabo',
-  'Paseo Marítimo, Malabo'
-];
 
             <View style={{ zIndex: 50 }}>
               <View style={styles.inputContainer}>
@@ -275,7 +263,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   map: { width: width, height: height },
   backButton: { position: 'absolute', top: 50, left: 20, backgroundColor: '#FFFFFF', padding: 10, borderRadius: 20, zIndex: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
-  carMarker: { backgroundColor: '#FFFFFF', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#D69E2E' },
   bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, paddingBottom: 40, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 10 },
   panelTitle: { fontSize: 22, fontWeight: 'bold', color: '#2D3748', marginBottom: 15 },
   scheduleRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },

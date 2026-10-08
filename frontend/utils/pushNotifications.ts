@@ -8,6 +8,11 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    // Expo SDK 55 reemplaza/complementa shouldShowAlert con estos dos campos
+    // (banner emergente vs. aparecer en la lista/centro de notificaciones);
+    // sin ellos, TypeScript rechaza el objeto por no cumplir NotificationBehavior.
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 

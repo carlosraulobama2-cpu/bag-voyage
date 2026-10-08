@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Dimensions, Animated, Easing, Platform, Alert } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import { io, Socket } from 'socket.io-client';
+import { RideMapView } from '../components/RideMapView';
 
 const { width, height } = Dimensions.get('window');
 const BACKEND_URL = Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
@@ -114,11 +114,9 @@ export default function DriverHomeScreen() {
         </View>
       </View>
 
-      <MapView 
-        style={styles.map} 
-        provider={PROVIDER_DEFAULT}
+      <RideMapView
+        style={styles.map}
         initialRegion={initialRegion}
-        showsUserLocation={true}
         customMapStyle={isOnline ? darkMapStyle : []} // Mapa oscuro si está online
       />
 

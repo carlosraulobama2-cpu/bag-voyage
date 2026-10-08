@@ -20,6 +20,7 @@ export const scheduleInactivityNotification = async () => {
       sound: true,
     },
     trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
       seconds: 15, // Test mode: 15 seconds. In prod, this would be 3 days (3 * 24 * 60 * 60)
     },
   });
@@ -47,6 +48,7 @@ export const scheduleAbandonedCartNotification = async () => {
       sound: true,
     },
     trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
       seconds: 10, // Test mode: 10 seconds. In prod: 15 mins (15 * 60)
     },
   });
@@ -74,6 +76,7 @@ export const scheduleRatingReminder = async (driverName: string) => {
       sound: true,
     },
     trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
       seconds: 12, // Test mode: 12 seconds. In prod: 1 hour (3600)
     },
   });

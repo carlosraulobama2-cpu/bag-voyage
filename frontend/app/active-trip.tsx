@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Dimensions, Alert } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { scheduleRatingReminder } from '../utils/smartNotifications';
+import { RideMapView } from '../components/RideMapView';
 
 const { width, height } = Dimensions.get('window');
 
@@ -51,22 +51,16 @@ export default function ActiveTripScreen() {
 
   return (
     <View style={styles.container}>
-      <MapView 
-        style={styles.map} 
-        provider={PROVIDER_DEFAULT}
+      <RideMapView
+        style={styles.map}
         region={{
           latitude: driverLocation.latitude,
           longitude: driverLocation.longitude,
           latitudeDelta: 0.02,
           longitudeDelta: 0.02,
         }}
-      >
-        <Marker coordinate={driverLocation} anchor={{ x: 0.5, y: 0.5 }}>
-          <View style={styles.carMarker}>
-            <Text style={{ fontSize: 24 }}>🚕</Text>
-          </View>
-        </Marker>
-      </MapView>
+        markers={[{ id: 'driver', lat: driverLocation.latitude, lng: driverLocation.longitude, anchorCenter: true, rotateDeg: 45 }]}
+      />
 
       {/* Botones Flotantes de Seguridad */}
       <View style={styles.floatingTopBar}>
@@ -157,8 +151,7 @@ export default function ActiveTripScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   map: { width: width, height: height },
-  carMarker: { backgroundColor: '#FFFFFF', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#D69E2E', transform: [{ rotate: '45deg' }] },
-  
+
   floatingTopBar: { position: 'absolute', top: 50, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', zIndex: 10 },
   iconBtn: { backgroundColor: '#FFFFFF', width: 45, height: 45, borderRadius: 25, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   safetyButtons: { flexDirection: 'row', gap: 10 },

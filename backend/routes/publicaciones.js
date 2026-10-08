@@ -34,9 +34,8 @@ router.post('/', verifyToken, async (req, res) => {
                 data: result.rows[0]
             });
         } catch (dbError) {
-            // Si la tabla no existe (probablemente porque es la primera vez)
-            console.error("Error de DB (asegúrate de haber creado la tabla en Neon):", dbError.message);
-            res.status(500).json({ success: false, message: 'Falta crear la tabla en Neon o error de base de datos' });
+            console.error("Error de DB al guardar la publicación:", dbError.message);
+            res.status(500).json({ success: false, message: 'Error de base de datos' });
         }
 
     } catch (error) {

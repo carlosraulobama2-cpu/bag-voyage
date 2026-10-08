@@ -41,7 +41,7 @@ router.post('/register', async (req, res) => {
 
     } catch (error) {
         console.error('Error en el registro:', error);
-        res.status(500).json({ success: false, message: 'Falta crear la tabla usuarios o error interno' });
+        res.status(500).json({ success: false, message: 'Error interno al registrar el usuario' });
     }
 });
 

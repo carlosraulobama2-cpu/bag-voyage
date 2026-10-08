@@ -74,9 +74,33 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      {/* Todas las pantallas fuera de (tabs) ya traen su propio header
+          (botón atrás, título, etc. dibujados a mano) — sin
+          `headerShown: false` por pantalla, cada una mostraba ADEMÁS la
+          barra nativa genérica con el nombre del archivo como título
+          ("auth/login", "ride-map"…), duplicada y encima de la real. Pasa
+          en cualquier plataforma, no sólo en la vista web. `modal` es la
+          excepción: no tiene botón de cerrar propio, así que necesita el
+          de la barra nativa. */}
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="auth/login" options={{ headerShown: false }} />
+        <Stack.Screen name="active-trip" options={{ headerShown: false }} />
+        <Stack.Screen name="courier" options={{ headerShown: false }} />
+        <Stack.Screen name="driver-home" options={{ headerShown: false }} />
+        <Stack.Screen name="driver-profile" options={{ headerShown: false }} />
+        <Stack.Screen name="driver-registration" options={{ headerShown: false }} />
+        <Stack.Screen name="food-delivery" options={{ headerShown: false }} />
+        <Stack.Screen name="rating" options={{ headerShown: false }} />
+        <Stack.Screen name="referrals" options={{ headerShown: false }} />
+        <Stack.Screen name="restaurant-dashboard" options={{ headerShown: false }} />
+        <Stack.Screen name="restaurant-menu" options={{ headerShown: false }} />
+        <Stack.Screen name="ride-map" options={{ headerShown: false }} />
+        <Stack.Screen name="trip-chat" options={{ headerShown: false }} />
+        <Stack.Screen name="trip-history" options={{ headerShown: false }} />
+        <Stack.Screen name="verify" options={{ headerShown: false }} />
+        <Stack.Screen name="wallet" options={{ headerShown: false }} />
       </Stack>
     </ThemeProvider>
   );
